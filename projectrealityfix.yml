@@ -1,0 +1,178 @@
+name: 'Project Reality: BF2 (With Browser Fix)'
+description: 'Installs Project Reality: Battlefield 2 with integrated browser login handler repairs.'
+game_slug: project-reality
+version: 'Project Reality: BF2 - Combined Local Installer'
+slug: project-reality-combined-local-installer
+runner: wine
+notes: |
+  Wine version recommendations:
+  - Kron4ek's latest wine-xx.xx-staging (https://github.com)
+  - WineHQ's latest wine-staging installed as system Wine
+
+  Other Wine versions are untested and may not work.
+
+script:
+  game:
+    exe: $GAMEDIR/drive_c/Program Files (x86)/Project Reality/Project Reality BF2/mods/pr/bin/PRLauncher.exe
+    working_dir: $GAMEDIR/drive_c/Program Files (x86)/Project Reality/Project Reality BF2/mods/pr/bin
+    arch: win64
+    prefix: $GAMEDIR
+
+  # For registering prlauncher-login mime protocol handler and icon
+  require-binaries: xdg-mime, update-desktop-database, xdg-icon-resource
+
+  installer:
+    # Prefix initialization
+    - execute:
+        command: mkdir -p "$GAMEDIR"
+
+    - task:
+        description: Creating Wine prefix
+        name: create_prefix
+        prefix: $GAMEDIR
+        install_mono: false
+        install_gecko: true
+        overrides:
+          # Prevent wineboot from installing mono
+          mscoree: disabled
+
+    - task:
+        description: Installing fonts
+        name: winetricks
+        app: corefonts
+        prefix: $GAMEDIR
+
+    - task:
+        description: Installing Windows components
+        name: winetricks
+        app: >-
+          msls31
+          msftedit
+        prefix: $GAMEDIR
+
+    - task:
+        description: Installing Microsoft Visual C++ 2012-2022 Redistributable
+        name: winetricks
+        app: vcrun2022
+        prefix: $GAMEDIR
+
+    - task:
+        description: Installing Microsoft DirectX 9 DLLs
+        name: winetricks
+        app: d3dx9
+        prefix: $GAMEDIR
+
+    - task:
+        description: Installing Microsoft .NET Framework 4
+        name: winetricks
+        app: dotnet40
+        prefix: $GAMEDIR
+
+    - task:
+        description: Installing Microsoft .NET Framework 4.8
+        name: winetricks
+        app: dotnet48
+        prefix: $GAMEDIR
+
+    - task:
+        description: Installing Microsoft D3DCompiler DLLs
+        name: winetricks
+        app: >-
+          d3dcompiler_42
+          d3dcompiler_43
+          d3dcompiler_46
+          d3dcompiler_47
+        prefix: $GAMEDIR
+
+    - task:
+        description: Set Windows version
+        name: wineexec
+        executable: winecfg.exe
+        args: /v win10
+        prefix: $GAMEDIR
+
+    # --- INTEGRATED BROWSER LOGIN REPAIR EXTENSION ---
+    - write_file:
+        description: Creating default browser settings .reg file
+        file: $CACHE/browser.reg
+        content: |-
+          REGEDIT4
+
+          [HKEY_CLASSES_ROOT]
+
+          [HKEY_CLASSES_ROOT\http]
+          "URL Protocol"=""
+
+          [HKEY_CLASSES_ROOT\http\shell]
+          @="open"
+
+          [HKEY_CLASSES_ROOT\http\shell\open]
+
+          [HKEY_CLASSES_ROOT\http\shell\open\command]
+          @="\"C:\\Windows\\System32\\winebrowser.exe\" \"%1\""
+
+          [HKEY_CLASSES_ROOT\https]
+          "URL Protocol"=""
+
+          [HKEY_CLASSES_ROOT\https\shell]
+          @="open"
+
+          [HKEY_CLASSES_ROOT\https\shell\open]
+
+          [HKEY_CLASSES_ROOT\https\shell\open\command]
+          @="\"C:\\Windows\\System32\\winebrowser.exe\" \"%1\""
+
+    - task:
+        description: Applying default browser settings .reg file
+        name: set_regedit_file
+        filename: $CACHE/browser.reg
+        prefix: $GAMEDIR
+    # --- END OF REPAIR EXTENSION SYSTEM ---
+
+    # Restart Wine in case user has configured custom DPI for the prefix
+    - task:
+        name: winekill
+        prefix: $GAMEDIR
+
+    # Create and register prlauncher-login mime protocol handler
+    - write_file:
+        file: $HOME/.local/share/applications/lutris-prlauncher-login.desktop
+        # Two sets of double quotes around the %u field code are required for login to work despite XDG Desktop Entry Specification saying it must not be used inside quotes.
+        content: |-
+          [Desktop Entry]
+          Exec=env WINEPREFIX="$GAMEDIR" WINEDEBUG=-all "$WINEBIN" "C:/Program Files (x86)/Project Reality/Project Reality BF2/mods/pr/bin/PRLauncherLogin.exe" ""%u""
+          Type=Application
+          Terminal=false
+          Comment=Launch PRLauncherLogin using Lutris
+          StartupWMClass=prlauncherlogin.exe
+          Name=PRLauncherLogin for Lutris
+          MimeType=x-scheme-handler/prlauncher-login
+
+    - execute:
+        #TODO: Remove custom PATH after Arch, CachyOS, Bazzite & co have updated their xdg-utils package (https://freedesktop.org)
+        command: env PATH=/lib64/qt6/bin:$PATH xdg-mime default lutris-prlauncher-login.desktop x-scheme-handler/prlauncher-login
+
+    - execute:
+        command: update-desktop-database "$HOME/.local/share/applications"
+
+    # Start installing PR
+    - task:
+        description: 'Running Project Reality: BF2 Setup'
+        name: wineexec
+        executable: $SCRIPTDIR/setup.exe
+        args: /SILENT
+        prefix: $GAMEDIR
+        blocking: true
+        exclude_processes: autorun.exe
+
+    - execute:
+        # Size 256 icon installed as size 128 resource because Lutris doesn't seem to find it otherwise.
+        command: xdg-icon-resource install --size 128 "$GAMEDIR/drive_c/Program Files (x86)/Project Reality/Project Reality BF2/icons/default.png" lutris_project-reality
+
+  system:
+    include_processes: >
+      PRBF2.exe
+      PRMumble.exe
+      PRUpdater.exe
+      PRLauncher.exe
+      PRLauncherLogin.exe
